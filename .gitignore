@@ -1,0 +1,68 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+.venv/
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Flask
+instance/
+.webassets-cache
+
+# Uploaded files and results
+static/uploads/*
+static/results/*
+
+# Keep directory structure
+!static/uploads/.gitkeep
+!static/results/.gitkeep
+
+# Data
+data/pm25_history.csv
+
+# OS
+.DS_Store
+Thumbs.db
+
+
+# Datasets images folder (kept out of repo to avoid large files)
+# Ignore all contents but allow top-level helper files (scripts, README, .gitkeep)
+datasets_images/*
+!datasets_images/*.py
+!datasets_images/README.md
+!datasets_images/.gitkeep
+!datasets_images/real/
+!datasets_images/real/**
+

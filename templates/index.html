@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PM2.5 Estimation System - Satellite Image Analysis</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        /* Embedded fallback styles in case external CSS fails */
+        body { font-family: Arial, sans-serif; margin: 0; padding: 0; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+    </style>
+</head>
+<body>
+    <div class="floating-stars" aria-hidden="true"></div>
+    <!-- Header -->
+    <header>
+        <div class="container">
+            <h1>🛰️ PM2.5 Estimation System</h1>
+            <p class="subtitle">A Magical Sky-Lens Experience for Image-Based Air Quality Insights</p>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="container">
+        
+        <!-- Upload Section -->
+        <section class="upload-section" id="upload-section">
+            <div class="card">
+                <h2>📤 Upload Satellite Image</h2>
+                <p>Upload a satellite image to estimate PM2.5 concentration and generate visualizations.</p>
+                
+                <form id="uploadForm" enctype="multipart/form-data">
+                    <div class="file-input-wrapper">
+                        <input type="file" id="satellite_image" name="satellite_image" 
+                               accept="image/*" required>
+                        <label for="satellite_image" class="file-label">
+                            <span id="file-name">Choose an image file...</span>
+                        </label>
+                    </div>
+                    
+                    <button type="submit" class="btn-primary" id="analyzeBtn">
+                        🔍 Analyze Image
+                    </button>
+                </form>
+                
+                <!-- Loading indicator -->
+                <div id="loading" class="loading" style="display: none;">
+                    <div class="spinner"></div>
+                    <p>Analyzing image... Please wait.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Error Display -->
+        <div id="error-message" class="error-message" style="display: none;"></div>
+
+        <!-- Results Section -->
+        <section id="results" class="results-section" style="display: none;">
+            
+            <!-- PM2.5 Value Card -->
+            <div class="card result-card" id="result-summary">
+                <h2>📊 Estimation Results</h2>
+                <div class="pm25-display">
+                    <div class="pm25-value">
+                        <span id="pm25-number">--</span>
+                        <span class="unit">µg/m³</span>
+                    </div>
+                    <div id="aqi-badge" class="aqi-badge">
+                        <span id="aqi-category">--</span>
+                    </div>
+                </div>
+                <div class="result-info">
+                    <p><strong>Confidence:</strong> <span id="confidence">--</span>%</p>
+                    <p><strong>Timestamp:</strong> <span id="timestamp">--</span></p>
+                    <p class="health-advice" id="health-advice">--</p>
+                </div>
+            </div>
+
+            <!-- Atmospheric Features -->
+            <div class="card" id="result-features">
+                <h2>🌡️ Atmospheric Features</h2>
+                <div class="features-grid">
+                    <div class="feature-item">
+                        <div class="feature-label">Haze Score</div>
+                        <div class="feature-value" id="feature-haze">--</div>
+                    </div>
+                    <div class="feature-item">
+                        <div class="feature-label">Turbidity</div>
+                        <div class="feature-value" id="feature-turbidity">--</div>
+                    </div>
+                    <div class="feature-item">
+                        <div class="feature-label">Visibility</div>
+                        <div class="feature-value" id="feature-visibility">--</div>
+                    </div>
+                    <div class="feature-item">
+                        <div class="feature-label">Contrast</div>
+                        <div class="feature-value" id="feature-contrast">--</div>
+                    </div>
+                    <div class="feature-item">
+                        <div class="feature-label">Brightness</div>
+                        <div class="feature-value" id="feature-brightness">--</div>
+                    </div>
+                    <div class="feature-item">
+                        <div class="feature-label">Saturation</div>
+                        <div class="feature-value" id="feature-saturation">--</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Visualizations -->
+            <div class="card" id="result-feature-chart">
+                <h2>📈 Feature Analysis</h2>
+                <img id="features-chart" src="" alt="Atmospheric Features Chart" class="result-image">
+            </div>
+
+            <div class="card" id="result-before-after">
+                <h2>🔄 Before & After Comparison</h2>
+                <p class="image-description">Left: Current conditions | Right: Simulated clear conditions</p>
+                <img id="before-after-image" src="" alt="Before/After Comparison" class="result-image">
+            </div>
+
+            <div class="card" id="result-original">
+                <h2>🖼️ Original Image</h2>
+                <img id="original-image" src="" alt="Original Satellite Image" class="result-image">
+            </div>
+
+            <div class="card" id="result-heatmap">
+                <h2>🗺️ PM2.5 Spatial Heatmap</h2>
+                <img id="heatmap-image" src="" alt="PM2.5 Heatmap" class="result-image">
+            </div>
+
+        </section>
+
+    </main>
+
+    <!-- Footer -->
+    <footer>
+        <div class="container">
+            <p>✨ Thank you for exploring air quality insights with us.</p>
+        </div>
+    </footer>
+
+    <!-- JavaScript -->
+    <script>
+        // File input handler
+        document.getElementById('satellite_image').addEventListener('change', function(e) {
+            const fileName = e.target.files[0]?.name || 'Choose an image file...';
+            document.getElementById('file-name').textContent = fileName;
+        });
+
+        // Form submission handler
+        document.getElementById('uploadForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const fileInput = document.getElementById('satellite_image');
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                showError('Please select an image file.');
+                return;
+            }
+            
+            // Hide previous results and errors
+            document.getElementById('results').style.display = 'none';
+            document.getElementById('error-message').style.display = 'none';
+            
+            // Show loading
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('analyzeBtn').disabled = true;
+            
+            // Prepare form data
+            const formData = new FormData();
+            formData.append('satellite_image', file);
+            
+            try {
+                // Send request
+                const response = await fetch('/analyze', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                // Hide loading
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('analyzeBtn').disabled = false;
+                
+                if (data.error) {
+                    showError(data.error);
+                    return;
+                }
+                
+                // Display results
+                displayResults(data);
+                
+            } catch (error) {
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('analyzeBtn').disabled = false;
+                showError('Network error: ' + error.message);
+            }
+        });
+
+        function displayResults(data) {
+            // Show results section
+            document.getElementById('results').style.display = 'block';
+            
+            // PM2.5 value
+            document.getElementById('pm25-number').textContent = data.pm25.toFixed(1);
+            
+            // AQI category
+            const aqiBadge = document.getElementById('aqi-badge');
+            const aqiCategory = document.getElementById('aqi-category');
+            aqiCategory.textContent = data.aqi_category;
+            aqiBadge.style.backgroundColor = data.aqi_color;
+            
+            // Confidence and timestamp
+            document.getElementById('confidence').textContent = data.confidence.toFixed(1);
+            document.getElementById('timestamp').textContent = data.timestamp;
+            
+            // Health advice
+            document.getElementById('health-advice').textContent = data.health_advice;
+            
+            // Features
+            document.getElementById('feature-haze').textContent = data.features.haze_score;
+            document.getElementById('feature-turbidity').textContent = data.features.turbidity;
+            document.getElementById('feature-visibility').textContent = data.features.visibility;
+            document.getElementById('feature-contrast').textContent = data.features.contrast;
+            document.getElementById('feature-brightness').textContent = data.features.brightness;
+            document.getElementById('feature-saturation').textContent = data.features.saturation;
+            
+            // Images
+            document.getElementById('features-chart').src = data.images.features_chart;
+            document.getElementById('heatmap-image').src = data.images.heatmap;
+            document.getElementById('before-after-image').src = data.images.before_after;
+            document.getElementById('original-image').src = data.images.original;
+            
+            // Scroll to results
+            document.getElementById('results').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function showError(message) {
+            const errorDiv = document.getElementById('error-message');
+            errorDiv.textContent = '⚠️ Error: ' + message;
+            errorDiv.style.display = 'block';
+            errorDiv.scrollIntoView({ behavior: 'smooth' });
+        }
+    </script>
+</body>
+</html>
