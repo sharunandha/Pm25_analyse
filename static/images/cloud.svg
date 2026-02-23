@@ -1,9 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 110" role="img" aria-label="cloud">
-  <defs>
-    <linearGradient id="c" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#ffffff"/>
-      <stop offset="100%" stop-color="#dbe9ff"/>
-    </linearGradient>
-  </defs>
-  <path fill="url(#c)" d="M50 92h62c23 0 40-13 40-30 0-16-14-29-34-30-6-14-21-24-39-24-24 0-43 16-46 36C15 45 3 56 3 71c0 12 10 21 23 21h24z"/>
-</svg>
