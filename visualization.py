@@ -83,14 +83,14 @@ class PM25Visualizer:
         ax.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
 
         levels = [0.00, 0.18, 0.32, 0.46, 0.60, 0.74, 1.01]
-        fill_colors = ['#f3f4f6', '#60a5fa', '#22d3ee', '#4ade80', '#fde047', '#fb923c', '#ef4444']
+        fill_colors = ['#f8f9fa', '#0099ff', '#00ffff', '#00ff00', '#ffff00', '#ff6600', '#ff0000']
 
-        ax.contourf(score, levels=levels, colors=fill_colors, alpha=0.55, origin='upper', antialiased=True)
+        ax.contourf(score, levels=levels, colors=fill_colors, alpha=0.65, origin='upper', antialiased=True)
         ax.contour(score,
                    levels=[0.32, 0.46, 0.60, 0.74],
-                   colors=['#3b82f6', '#10b981', '#f59e0b', '#dc2626'],
-                   linewidths=1.3,
-                   alpha=0.9,
+                   colors=['#0066cc', '#00cc00', '#ff9900', '#ff0000'],
+                   linewidths=2.0,
+                   alpha=0.95,
                    origin='upper')
 
         ax.set_title(f'PM2.5 Heatmap Overlay (Low-Medium-High)  |  Est: {pm25_value:.1f} ug/m3',
@@ -100,9 +100,9 @@ class PM25Visualizer:
         # Custom legend
         from matplotlib.patches import Patch
         legend_elements = [
-            Patch(facecolor='#60a5fa', edgecolor='#333', label='Low PM2.5'),
-            Patch(facecolor='#fde047', edgecolor='#333', label='Moderate PM2.5'),
-            Patch(facecolor='#ef4444', edgecolor='#333', label='High PM2.5'),
+            Patch(facecolor='#0099ff', edgecolor='#000', label='Low PM2.5'),
+            Patch(facecolor='#ffff00', edgecolor='#000', label='Moderate PM2.5'),
+            Patch(facecolor='#ff0000', edgecolor='#000', label='High PM2.5'),
         ]
         ax.legend(handles=legend_elements, loc='lower right', fontsize=10,
                   framealpha=0.9, facecolor='#ffffff', edgecolor='#d1d5db',
