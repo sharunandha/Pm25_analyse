@@ -3,248 +3,191 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PM2.5 Estimation System - Satellite Image Analysis</title>
+    <title>PM2.5 Estimation System</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-    <style>
-        /* Embedded fallback styles in case external CSS fails */
-        body { font-family: Arial, sans-serif; margin: 0; padding: 0; }
-        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
-    </style>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
 </head>
 <body>
-    <div class="floating-stars" aria-hidden="true"></div>
-    <!-- Header -->
     <header>
-        <div class="container">
-            <h1>🛰️ PM2.5 Estimation System</h1>
-            <p class="subtitle">A Magical Sky-Lens Experience for Image-Based Air Quality Insights</p>
+        <div class="container header-inner">
+            <div class="logo-group">
+                <div class="logo-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></div>
+                <div>
+                    <h1>PM2.5 Estimation System</h1>
+                    <p class="subtitle">High-Resolution Satellite Image Analysis for Air Quality Assessment</p>
+                </div>
+            </div>
+            <div class="header-badge">v1.0</div>
         </div>
     </header>
-
-    <!-- Main Content -->
     <main class="container">
-        
-        <!-- Upload Section -->
         <section class="upload-section" id="upload-section">
             <div class="card">
-                <h2>📤 Upload Satellite Image</h2>
-                <p>Upload a satellite image to estimate PM2.5 concentration and generate visualizations.</p>
-                
+                <div class="card-header"><span class="card-icon">01</span><h2>Upload Satellite Image</h2></div>
+                <p class="card-desc">Upload a satellite image to estimate PM2.5 concentration, extract atmospheric features, and generate comprehensive visualizations.</p>
                 <form id="uploadForm" enctype="multipart/form-data">
-                    <div class="file-input-wrapper">
-                        <input type="file" id="satellite_image" name="satellite_image" 
-                               accept="image/*" required>
-                        <label for="satellite_image" class="file-label">
-                            <span id="file-name">Choose an image file...</span>
-                        </label>
+                    <div class="file-drop-zone" id="dropZone">
+                        <input type="file" id="satellite_image" name="satellite_image" accept="image/*" required>
+                        <div class="drop-content">
+                            <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                            <p class="drop-text" id="file-name">Drag &amp; drop or click to select an image</p>
+                            <span class="drop-hint">PNG, JPG, JPEG, TIFF, BMP &mdash; Max 16 MB</span>
+                        </div>
                     </div>
-                    
-                    <button type="submit" class="btn-primary" id="analyzeBtn">
-                        🔍 Analyze Image
-                    </button>
+                    <div id="upload-preview" class="upload-preview" style="display:none;">
+                        <img id="preview-img" src="" alt="Preview">
+                        <button type="button" class="remove-preview" id="removePreview">&times;</button>
+                    </div>
+                    <button type="submit" class="btn-primary" id="analyzeBtn">Analyze Image</button>
                 </form>
-                
-                <!-- Loading indicator -->
                 <div id="loading" class="loading" style="display: none;">
                     <div class="spinner"></div>
-                    <p>Analyzing image... Please wait.</p>
+                    <p>Processing satellite image &mdash; extracting features and estimating PM2.5...</p>
+                    <div class="progress-bar-track"><div class="progress-bar-fill" id="progressBar"></div></div>
                 </div>
             </div>
         </section>
-
-        <!-- Error Display -->
         <div id="error-message" class="error-message" style="display: none;"></div>
-
-        <!-- Results Section -->
         <section id="results" class="results-section" style="display: none;">
-            
-            <!-- PM2.5 Value Card -->
+            <div class="card result-card" id="result-original">
+                <div class="card-header"><span class="card-icon">02</span><h2>Original Satellite Image</h2></div>
+                <p class="card-desc">The uploaded satellite image used as input for PM2.5 analysis.</p>
+                <div class="image-container"><img id="original-image" src="" alt="Original" class="result-image"></div>
+            </div>
             <div class="card result-card" id="result-summary">
-                <h2>📊 Estimation Results</h2>
+                <div class="card-header"><span class="card-icon">03</span><h2>PM2.5 Estimation Results</h2></div>
                 <div class="pm25-display">
-                    <div class="pm25-value">
-                        <span id="pm25-number">--</span>
-                        <span class="unit">µg/m³</span>
+                    <div class="pm25-main">
+                        <div class="pm25-value-wrap">
+                            <span class="pm25-label">Estimated PM2.5</span>
+                            <span id="pm25-number" class="pm25-number">--</span>
+                            <span class="pm25-unit">microg/m3</span>
+                        </div>
+                        <div id="aqi-badge" class="aqi-badge"><span id="aqi-category">--</span></div>
                     </div>
-                    <div id="aqi-badge" class="aqi-badge">
-                        <span id="aqi-category">--</span>
+                    <div class="pm25-meta">
+                        <div class="meta-item"><span class="meta-label">Confidence</span><span class="meta-value" id="confidence">--%</span></div>
+                        <div class="meta-item"><span class="meta-label">Timestamp</span><span class="meta-value" id="timestamp">--</span></div>
                     </div>
                 </div>
-                <div class="result-info">
-                    <p><strong>Confidence:</strong> <span id="confidence">--</span>%</p>
-                    <p><strong>Timestamp:</strong> <span id="timestamp">--</span></p>
-                    <p class="health-advice" id="health-advice">--</p>
-                </div>
+                <div class="health-advice" id="health-advice">--</div>
             </div>
-
-            <!-- Atmospheric Features -->
-            <div class="card" id="result-features">
-                <h2>🌡️ Atmospheric Features</h2>
+            <div class="card result-card" id="result-features">
+                <div class="card-header"><span class="card-icon">04</span><h2>Atmospheric Features</h2></div>
+                <p class="card-desc">Extracted atmospheric parameters from image processing analysis.</p>
                 <div class="features-grid">
-                    <div class="feature-item">
-                        <div class="feature-label">Haze Score</div>
-                        <div class="feature-value" id="feature-haze">--</div>
-                    </div>
-                    <div class="feature-item">
-                        <div class="feature-label">Turbidity</div>
-                        <div class="feature-value" id="feature-turbidity">--</div>
-                    </div>
-                    <div class="feature-item">
-                        <div class="feature-label">Visibility</div>
-                        <div class="feature-value" id="feature-visibility">--</div>
-                    </div>
-                    <div class="feature-item">
-                        <div class="feature-label">Contrast</div>
-                        <div class="feature-value" id="feature-contrast">--</div>
-                    </div>
-                    <div class="feature-item">
-                        <div class="feature-label">Brightness</div>
-                        <div class="feature-value" id="feature-brightness">--</div>
-                    </div>
-                    <div class="feature-item">
-                        <div class="feature-label">Saturation</div>
-                        <div class="feature-value" id="feature-saturation">--</div>
-                    </div>
+                    <div class="feature-item"><span class="feature-label">Haze Score</span><span class="feature-value" id="feature-haze">--</span><div class="feature-bar"><div class="feature-bar-fill haze" id="bar-haze"></div></div></div>
+                    <div class="feature-item"><span class="feature-label">Turbidity</span><span class="feature-value" id="feature-turbidity">--</span><div class="feature-bar"><div class="feature-bar-fill turbidity" id="bar-turbidity"></div></div></div>
+                    <div class="feature-item"><span class="feature-label">Visibility</span><span class="feature-value" id="feature-visibility">--</span><div class="feature-bar"><div class="feature-bar-fill visibility" id="bar-visibility"></div></div></div>
+                    <div class="feature-item"><span class="feature-label">Contrast</span><span class="feature-value" id="feature-contrast">--</span><div class="feature-bar"><div class="feature-bar-fill contrast" id="bar-contrast"></div></div></div>
+                    <div class="feature-item"><span class="feature-label">Brightness</span><span class="feature-value" id="feature-brightness">--</span><div class="feature-bar"><div class="feature-bar-fill brightness" id="bar-brightness"></div></div></div>
+                    <div class="feature-item"><span class="feature-label">Saturation</span><span class="feature-value" id="feature-saturation">--</span><div class="feature-bar"><div class="feature-bar-fill saturation" id="bar-saturation"></div></div></div>
                 </div>
             </div>
-
-            <!-- Visualizations -->
-            <div class="card" id="result-feature-chart">
-                <h2>📈 Feature Analysis</h2>
-                <img id="features-chart" src="" alt="Atmospheric Features Chart" class="result-image">
+            <div class="card result-card" id="result-feature-chart">
+                <div class="card-header"><span class="card-icon">05</span><h2>Feature Analysis Graph</h2></div>
+                <p class="card-desc">Bar and line chart visualization of extracted atmospheric features.</p>
+                <div class="image-container"><img id="features-chart" src="" alt="Feature Chart" class="result-image"></div>
             </div>
-
-            <div class="card" id="result-before-after">
-                <h2>🔄 Before & After Comparison</h2>
-                <p class="image-description">Left: Current conditions | Right: Simulated clear conditions</p>
-                <img id="before-after-image" src="" alt="Before/After Comparison" class="result-image">
+            <div class="card result-card" id="result-heatmap">
+                <div class="card-header"><span class="card-icon">06</span><h2>PM2.5 Spatial Heatmap</h2></div>
+                <p class="card-desc">Spatial distribution of estimated PM2.5 concentration across the image.</p>
+                <div class="image-container"><img id="heatmap-image" src="" alt="PM2.5 Heatmap" class="result-image"></div>
             </div>
-
-            <div class="card" id="result-original">
-                <h2>🖼️ Original Image</h2>
-                <img id="original-image" src="" alt="Original Satellite Image" class="result-image">
+            <div class="card result-card" id="result-dehazed">
+                <div class="card-header"><span class="card-icon">07</span><h2>PM2.5 Removal &mdash; Dehazed Image</h2></div>
+                <p class="card-desc">Image after simulated PM2.5/haze removal using adaptive histogram equalization and color correction.</p>
+                <div class="image-container"><img id="dehazed-image" src="" alt="Dehazed Image" class="result-image"></div>
             </div>
-
-            <div class="card" id="result-heatmap">
-                <h2>🗺️ PM2.5 Spatial Heatmap</h2>
-                <img id="heatmap-image" src="" alt="PM2.5 Heatmap" class="result-image">
+            <div class="card result-card" id="result-before-after">
+                <div class="card-header"><span class="card-icon">08</span><h2>Before &amp; After Comparison</h2></div>
+                <p class="card-desc">Side-by-side comparison of original (polluted) vs. simulated clear (dehazed) conditions.</p>
+                <div class="image-container"><img id="before-after-image" src="" alt="Before/After" class="result-image"></div>
             </div>
 
         </section>
-
     </main>
-
-    <!-- Footer -->
     <footer>
-        <div class="container">
-            <p>✨ Thank you for exploring air quality insights with us.</p>
+        <div class="container footer-inner">
+            <p>PM2.5 Estimation System &mdash; High-Resolution Satellite Image Analysis</p>
+            <p class="footer-sub">Final Year Engineering Project &bull; 2026</p>
         </div>
     </footer>
-
-    <!-- JavaScript -->
     <script>
-        // File input handler
-        document.getElementById('satellite_image').addEventListener('change', function(e) {
-            const fileName = e.target.files[0]?.name || 'Choose an image file...';
-            document.getElementById('file-name').textContent = fileName;
+        const fileInput = document.getElementById('satellite_image');
+        const dropZone = document.getElementById('dropZone');
+        const previewWrap = document.getElementById('upload-preview');
+        const previewImg = document.getElementById('preview-img');
+        fileInput.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) { document.getElementById('file-name').textContent = file.name; showPreview(file); }
         });
-
-        // Form submission handler
+        dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+        dropZone.addEventListener('drop', e => {
+            e.preventDefault(); dropZone.classList.remove('drag-over');
+            if (e.dataTransfer.files.length) { fileInput.files = e.dataTransfer.files; document.getElementById('file-name').textContent = e.dataTransfer.files[0].name; showPreview(e.dataTransfer.files[0]); }
+        });
+        function showPreview(file) { const r = new FileReader(); r.onload = e => { previewImg.src = e.target.result; previewWrap.style.display = 'block'; }; r.readAsDataURL(file); }
+        document.getElementById('removePreview').addEventListener('click', () => { previewWrap.style.display = 'none'; fileInput.value = ''; document.getElementById('file-name').textContent = 'Drag & drop or click to select an image'; });
+        let progressInterval;
+        function startProgress() { let w = 0; const bar = document.getElementById('progressBar'); bar.style.width = '0%'; progressInterval = setInterval(() => { if (w < 90) { w += Math.random() * 8; if (w > 90) w = 90; bar.style.width = w + '%'; } }, 400); }
+        function completeProgress() { clearInterval(progressInterval); document.getElementById('progressBar').style.width = '100%'; }
         document.getElementById('uploadForm').addEventListener('submit', async function(e) {
             e.preventDefault();
-            
-            const fileInput = document.getElementById('satellite_image');
             const file = fileInput.files[0];
-            
-            if (!file) {
-                showError('Please select an image file.');
-                return;
-            }
-            
-            // Hide previous results and errors
+            if (!file) { showError('Please select an image file.'); return; }
             document.getElementById('results').style.display = 'none';
             document.getElementById('error-message').style.display = 'none';
-            
-            // Show loading
             document.getElementById('loading').style.display = 'block';
             document.getElementById('analyzeBtn').disabled = true;
-            
-            // Prepare form data
+            startProgress();
             const formData = new FormData();
             formData.append('satellite_image', file);
-            
             try {
-                // Send request
-                const response = await fetch('/analyze', {
-                    method: 'POST',
-                    body: formData
-                });
-                
+                const response = await fetch('/analyze', { method: 'POST', body: formData });
                 const data = await response.json();
-                
-                // Hide loading
-                document.getElementById('loading').style.display = 'none';
-                document.getElementById('analyzeBtn').disabled = false;
-                
-                if (data.error) {
-                    showError(data.error);
-                    return;
-                }
-                
-                // Display results
-                displayResults(data);
-                
+                completeProgress();
+                setTimeout(() => {
+                    document.getElementById('loading').style.display = 'none';
+                    document.getElementById('analyzeBtn').disabled = false;
+                    if (data.error) { showError(data.error); return; }
+                    displayResults(data);
+                }, 500);
             } catch (error) {
+                completeProgress();
                 document.getElementById('loading').style.display = 'none';
                 document.getElementById('analyzeBtn').disabled = false;
                 showError('Network error: ' + error.message);
             }
         });
-
         function displayResults(data) {
-            // Show results section
             document.getElementById('results').style.display = 'block';
-            
-            // PM2.5 value
-            document.getElementById('pm25-number').textContent = data.pm25.toFixed(1);
-            
-            // AQI category
+            document.getElementById('original-image').src = data.images.original;
+            animateNumber('pm25-number', data.pm25, 1);
             const aqiBadge = document.getElementById('aqi-badge');
-            const aqiCategory = document.getElementById('aqi-category');
-            aqiCategory.textContent = data.aqi_category;
+            document.getElementById('aqi-category').textContent = data.aqi_category;
             aqiBadge.style.backgroundColor = data.aqi_color;
-            
-            // Confidence and timestamp
-            document.getElementById('confidence').textContent = data.confidence.toFixed(1);
+            document.getElementById('confidence').textContent = data.confidence.toFixed(1) + '%';
             document.getElementById('timestamp').textContent = data.timestamp;
-            
-            // Health advice
             document.getElementById('health-advice').textContent = data.health_advice;
-            
-            // Features
-            document.getElementById('feature-haze').textContent = data.features.haze_score;
-            document.getElementById('feature-turbidity').textContent = data.features.turbidity;
-            document.getElementById('feature-visibility').textContent = data.features.visibility;
-            document.getElementById('feature-contrast').textContent = data.features.contrast;
-            document.getElementById('feature-brightness').textContent = data.features.brightness;
-            document.getElementById('feature-saturation').textContent = data.features.saturation;
-            
-            // Images
+            setFeature('haze', data.features.haze_score);
+            setFeature('turbidity', data.features.turbidity);
+            setFeature('visibility', data.features.visibility);
+            setFeature('contrast', data.features.contrast);
+            setFeature('brightness', data.features.brightness);
+            setFeature('saturation', data.features.saturation);
             document.getElementById('features-chart').src = data.images.features_chart;
             document.getElementById('heatmap-image').src = data.images.heatmap;
+            document.getElementById('dehazed-image').src = data.images.dehazed;
             document.getElementById('before-after-image').src = data.images.before_after;
-            document.getElementById('original-image').src = data.images.original;
-            
-            // Scroll to results
-            document.getElementById('results').scrollIntoView({ behavior: 'smooth' });
+            document.getElementById('result-original').scrollIntoView({ behavior: 'smooth', block: 'start' });
+            const cards = document.querySelectorAll('.result-card');
+            cards.forEach((card, i) => { card.style.opacity = '0'; card.style.transform = 'translateY(30px)'; setTimeout(() => { card.style.transition = 'opacity 0.5s ease, transform 0.5s ease'; card.style.opacity = '1'; card.style.transform = 'translateY(0)'; }, i * 150); });
         }
-
-        function showError(message) {
-            const errorDiv = document.getElementById('error-message');
-            errorDiv.textContent = '⚠️ Error: ' + message;
-            errorDiv.style.display = 'block';
-            errorDiv.scrollIntoView({ behavior: 'smooth' });
-        }
+        function setFeature(name, value) { document.getElementById('feature-' + name).textContent = value; const bar = document.getElementById('bar-' + name); const pct = Math.min(value, 100); setTimeout(() => { bar.style.width = pct + '%'; }, 300); }
+        function animateNumber(id, target, decimals) { const el = document.getElementById(id); let c = 0; const s = target / 40; const iv = setInterval(() => { c += s; if (c >= target) { c = target; clearInterval(iv); } el.textContent = c.toFixed(decimals); }, 25); }
+        function showError(message) { const d = document.getElementById('error-message'); d.textContent = 'Error: ' + message; d.style.display = 'block'; d.scrollIntoView({ behavior: 'smooth' }); }
     </script>
 </body>
 </html>

@@ -119,6 +119,11 @@ def analyze():
         )
         print(f"✓ Before/After created: {before_after_path}")
         
+        dehazed_path = visualizer.create_dehazed(
+            filepath, f'dehazed_{vis_timestamp}.png'
+        )
+        print(f"✓ Dehazed image created: {dehazed_path}")
+        
         timeseries_path = visualizer.create_timeseries_graph(
             pm25_value, output_name=f'timeseries_{vis_timestamp}.png'
         )
@@ -148,6 +153,7 @@ def analyze():
             'images': {
                 'original': url_for('static', filename=f'uploads/{unique_filename}'),
                 'heatmap': url_for('static', filename=f'results/heatmap_{vis_timestamp}.png'),
+                'dehazed': url_for('static', filename=f'results/dehazed_{vis_timestamp}.png'),
                 'before_after': url_for('static', filename=f'results/before_after_{vis_timestamp}.png'),
                 'timeseries': url_for('static', filename=f'results/timeseries_{vis_timestamp}.png'),
                 'features_chart': url_for('static', filename=f'results/features_{vis_timestamp}.png')

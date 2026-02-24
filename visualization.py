@@ -1,16 +1,15 @@
 """
 Visualization Module
 Generates visual outputs for PM2.5 estimation results.
-Creates heatmaps, before/after comparisons, and time-series graphs.
-
-Author: PM2.5 Estimation System
+Creates heatmaps, before/after comparisons, dehazed images, and time-series graphs.
 """
 
 import cv2
 import numpy as np
 import matplotlib
-matplotlib.use('Agg')  # Use non-interactive backend
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
 from datetime import datetime, timedelta
 import os
 import csv
@@ -18,163 +17,210 @@ from typing import Dict, Tuple, List
 
 
 class PM25Visualizer:
-    """
-    Creates visualizations for PM2.5 estimation results.
-    """
-    
+    """Creates visualizations for PM2.5 estimation results."""
+
     def __init__(self, results_dir: str = 'static/results'):
-        """
-        Initialize visualizer.
-        
-        Args:
-            results_dir: Directory to save visualization outputs
-        """
         self.results_dir = results_dir
         os.makedirs(results_dir, exist_ok=True)
-        
-        # Set matplotlib style for better-looking plots
-        plt.rcParams['figure.facecolor'] = 'white'
-    
-    def create_heatmap(self, image_path: str, pm25_value: float, 
-                      output_name: str = 'heatmap.png') -> str:
+        plt.rcParams.update({
+            'figure.facecolor': '#ffffff',
+            'axes.facecolor': '#fafbff',
+            'axes.edgecolor': '#d1d5db',
+            'axes.labelcolor': '#374151',
+            'text.color': '#111827',
+            'xtick.color': '#6b7280',
+            'ytick.color': '#6b7280',
+            'grid.color': '#e5e7eb',
+            'grid.alpha': 0.6,
+            'font.family': 'sans-serif',
+            'font.size': 11,
+        })
+
+    def create_heatmap(self, image_path: str, pm25_value: float,
+                       output_name: str = 'heatmap.png') -> str:
         """
-        Create a PM2.5 concentration heatmap overlay on the satellite image.
-        
-        Args:
-            image_path: Path to original satellite image
-            pm25_value: Estimated PM2.5 concentration
-            output_name: Name for output file
-            
-        Returns:
-            str: Path to saved heatmap image
+        Create a PM2.5 grid heatmap overlay (Red = PM2.5 present, Green = clean).
+
+        Method:
+        1. Divide the image into a grid of blocks (e.g. 20x20 pixels).
+        2. For each block, compute a PM2.5 likelihood score using:
+           - Haze Index: high brightness + low saturation = hazy/polluted
+           - Vegetation Index: green-dominant pixels indicate clean areas
+           - Contrast: low local contrast suggests haze/aerosol scattering
+           The combined score is:
+             score = 0.45*haze + 0.30*(1-vegetation) + 0.25*(1-contrast_norm)
+        3. Threshold the score: score >= 0.45 → Red (PM2.5), else → Green (clean).
+        4. Apply the colored grid as a semi-transparent overlay on the original image.
         """
-        # Load image
         image = cv2.imread(image_path)
         image = cv2.resize(image, (800, 600))
-        
-        # Create heatmap based on image intensity and PM2.5 value
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        
-        # Invert and normalize - darker areas = higher pollution
-        heatmap_data = 255 - gray
-        heatmap_data = cv2.GaussianBlur(heatmap_data, (21, 21), 0)
-        
-        # Normalize to PM2.5 scale
-        heatmap_data = (heatmap_data / 255.0) * pm25_value
-        
-        # Create colormap
-        # Blue (low) -> Green -> Yellow -> Red (high)
-        heatmap_colored = cv2.applyColorMap(
-            (heatmap_data / max(pm25_value, 1) * 255).astype(np.uint8),
-            cv2.COLORMAP_JET
-        )
-        
-        # Blend with original image
-        overlay = cv2.addWeighted(image, 0.6, heatmap_colored, 0.4, 0)
-        
-        # Add colorbar
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6), 
-                                       gridspec_kw={'width_ratios': [20, 1]})
-        
-        # Display overlay
-        ax1.imshow(cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB))
-        ax1.set_title(f'PM2.5 Spatial Distribution (Est. {pm25_value:.1f} µg/m³)', 
-                     fontsize=14, fontweight='bold')
-        ax1.axis('off')
-        
-        # Add colorbar
-        norm = plt.Normalize(vmin=0, vmax=pm25_value)
-        sm = plt.cm.ScalarMappable(cmap='jet', norm=norm)
-        sm.set_array([])
-        cbar = plt.colorbar(sm, cax=ax2)
-        cbar.set_label('PM2.5 (µg/m³)', rotation=270, labelpad=20, fontsize=11)
-        
+        h, w = image.shape[:2]
+
+        # Convert to useful color spaces
+        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV).astype(np.float32)
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY).astype(np.float32)
+        img_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB).astype(np.float32)
+
+        grid_size = 20  # pixels per grid block
+        rows = h // grid_size
+        cols = w // grid_size
+
+        # Create overlay with same size as image
+        overlay = image.copy()
+
+        # Red and green colors (BGR)
+        RED = (0, 0, 220)
+        GREEN = (0, 180, 0)
+
+        for r in range(rows):
+            for c in range(cols):
+                y1 = r * grid_size
+                y2 = y1 + grid_size
+                x1 = c * grid_size
+                x2 = x1 + grid_size
+
+                block_hsv = hsv[y1:y2, x1:x2]
+                block_gray = gray[y1:y2, x1:x2]
+                block_rgb = img_rgb[y1:y2, x1:x2]
+
+                # --- Haze Index ---
+                # Haze = bright + desaturated pixels
+                brightness = block_hsv[:, :, 2] / 255.0  # V channel
+                saturation = block_hsv[:, :, 1] / 255.0  # S channel
+                haze_score = np.mean(brightness * (1.0 - saturation))  # 0-1
+
+                # --- Vegetation Index (pseudo-NDVI from RGB) ---
+                # Green channel dominance relative to red
+                r_ch = block_rgb[:, :, 0]
+                g_ch = block_rgb[:, :, 1]
+                denom = r_ch + g_ch + 1e-6
+                veg_index = np.mean((g_ch - r_ch) / denom)  # -1 to 1
+                veg_score = np.clip((veg_index + 1) / 2.0, 0, 1)  # normalize to 0-1
+
+                # --- Local Contrast ---
+                contrast = np.std(block_gray) / 128.0  # normalized
+                contrast = np.clip(contrast, 0, 1)
+
+                # --- Combined PM2.5 likelihood score ---
+                pm25_score = (0.45 * haze_score +
+                              0.30 * (1.0 - veg_score) +
+                              0.25 * (1.0 - contrast))
+
+                # Threshold: mark as polluted or clean
+                if pm25_score >= 0.45:
+                    color = RED
+                else:
+                    color = GREEN
+
+                cv2.rectangle(overlay, (x1, y1), (x2, y2), color, -1)
+
+        # Blend overlay with original image (semi-transparent)
+        blended = cv2.addWeighted(image, 0.45, overlay, 0.55, 0)
+
+        # Draw grid lines for clarity
+        for r in range(rows + 1):
+            y = r * grid_size
+            cv2.line(blended, (0, y), (w, y), (40, 40, 40), 1)
+        for c in range(cols + 1):
+            x = c * grid_size
+            cv2.line(blended, (x, 0), (x, h), (40, 40, 40), 1)
+
+        # Plot with legend
+        fig, ax = plt.subplots(figsize=(12, 8))
+        ax.imshow(cv2.cvtColor(blended, cv2.COLOR_BGR2RGB))
+        ax.set_title(f'PM2.5 Grid Heatmap Overlay (Low-Medium-High)  |  Est: {pm25_value:.1f} ug/m3',
+                     fontsize=14, fontweight='bold', pad=14)
+        ax.axis('off')
+
+        # Custom legend
+        from matplotlib.patches import Patch
+        legend_elements = [
+            Patch(facecolor='#dc2626', edgecolor='#333', label='PM2.5 Detected (Polluted)'),
+            Patch(facecolor='#16a34a', edgecolor='#333', label='Clean / Vegetation'),
+        ]
+        ax.legend(handles=legend_elements, loc='lower right', fontsize=10,
+                  framealpha=0.9, facecolor='#ffffff', edgecolor='#d1d5db',
+                  labelcolor='#111827')
+
         plt.tight_layout()
-        
-        # Save
         output_path = os.path.join(self.results_dir, output_name)
-        plt.savefig(output_path, dpi=150, bbox_inches='tight')
+        plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='#ffffff')
         plt.close()
-        
         return output_path
-    
-    def create_before_after(self, image_path: str, 
-                           output_name: str = 'before_after.png') -> str:
-        """
-        Create before/after pollution visualization.
-        Before = original, After = contrast-enhanced (simulating reduced pollution)
-        
-        Args:
-            image_path: Path to original satellite image
-            output_name: Name for output file
-            
-        Returns:
-            str: Path to saved comparison image
-        """
-        # Load image
-        image = cv2.imread(image_path)
-        image = cv2.resize(image, (800, 600))
-        
-        # Create "after" version with enhanced clarity
-        # Simulates what the area would look like with less pollution
+
+    def _generate_dehazed_image(self, image: np.ndarray) -> np.ndarray:
+        """Generate a smoother dehazed image with reduced artifacts."""
+        # Resize with high-quality interpolation to reduce jagged edges
+        image = cv2.resize(image, (800, 600), interpolation=cv2.INTER_LANCZOS4)
+
+        # Convert to LAB and gently enhance luminance
         lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
         l, a, b = cv2.split(lab)
-        
-        # Apply CLAHE (Contrast Limited Adaptive Histogram Equalization)
-        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+
+        # Denoise luminance first to avoid CLAHE tile artifacts
+        l = cv2.bilateralFilter(l, d=7, sigmaColor=35, sigmaSpace=35)
+
+        # Use softer CLAHE settings and larger tile size for smoother regions
+        clahe = cv2.createCLAHE(clipLimit=1.8, tileGridSize=(16, 16))
         l_enhanced = clahe.apply(l)
-        
-        # Merge channels
+
         enhanced = cv2.merge([l_enhanced, a, b])
         enhanced = cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
-        
-        # Increase saturation slightly
+
+        # Very mild saturation boost
         hsv = cv2.cvtColor(enhanced, cv2.COLOR_BGR2HSV)
-        hsv[:, :, 1] = cv2.add(hsv[:, :, 1], 30)
+        saturation = hsv[:, :, 1].astype(np.float32) * 1.06
+        hsv[:, :, 1] = np.clip(saturation, 0, 255).astype(np.uint8)
         enhanced = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
-        
-        # Create side-by-side comparison
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
-        
-        # Before
-        ax1.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-        ax1.set_title('Current Conditions\n(With Pollution)', 
-                     fontsize=13, fontweight='bold')
-        ax1.axis('off')
-        
-        # After
-        ax2.imshow(cv2.cvtColor(enhanced, cv2.COLOR_BGR2RGB))
-        ax2.set_title('Simulated Clear Conditions\n(Reduced Pollution)', 
-                     fontsize=13, fontweight='bold')
-        ax2.axis('off')
-        
-        plt.tight_layout()
-        
-        # Save
+
+        # Light denoise + conservative unsharp mask
+        enhanced = cv2.fastNlMeansDenoisingColored(enhanced, None, 3, 3, 7, 21)
+        blur = cv2.GaussianBlur(enhanced, (0, 0), 1.2)
+        enhanced = cv2.addWeighted(enhanced, 1.08, blur, -0.08, 0)
+
+        return enhanced
+
+    def create_dehazed(self, image_path: str,
+                       output_name: str = 'dehazed.png') -> str:
+        """Create a standalone dehazed (PM2.5 removal) image."""
+        image = cv2.imread(image_path)
         output_path = os.path.join(self.results_dir, output_name)
-        plt.savefig(output_path, dpi=150, bbox_inches='tight')
-        plt.close()
-        
+        enhanced = self._generate_dehazed_image(image)
+
+        # Save directly to avoid matplotlib resampling artifacts
+        cv2.imwrite(output_path, enhanced, [cv2.IMWRITE_PNG_COMPRESSION, 1])
         return output_path
-    
-    def create_timeseries_graph(self, current_pm25: float, 
-                               history_file: str = 'data/pm25_history.csv',
-                               output_name: str = 'timeseries.png') -> str:
-        """
-        Create date-wise PM2.5 time series graph.
-        
-        Args:
-            current_pm25: Current PM2.5 estimate to add
-            history_file: Path to CSV file with historical data
-            output_name: Name for output file
-            
-        Returns:
-            str: Path to saved graph
-        """
-        # Load or create history
+
+    def create_before_after(self, image_path: str,
+                            output_name: str = 'before_after.png') -> str:
+        """Create before/after pollution comparison."""
+        image = cv2.imread(image_path)
+        original = cv2.resize(image, (800, 600), interpolation=cv2.INTER_LANCZOS4)
+        enhanced = self._generate_dehazed_image(image)
+
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+        ax1.imshow(cv2.cvtColor(original, cv2.COLOR_BGR2RGB))
+        ax1.set_title('Original (With Pollution)', fontsize=13, fontweight='bold', color='#dc2626')
+        ax1.axis('off')
+        ax2.imshow(cv2.cvtColor(enhanced, cv2.COLOR_BGR2RGB))
+        ax2.set_title('After PM2.5 Removal (Dehazed)', fontsize=13, fontweight='bold', color='#16a34a')
+        ax2.axis('off')
+
+        # Add border between images
+        fig.subplots_adjust(wspace=0.04)
+        plt.tight_layout()
+        output_path = os.path.join(self.results_dir, output_name)
+        plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='#ffffff')
+        plt.close()
+        return output_path
+
+    def create_timeseries_graph(self, current_pm25: float,
+                                history_file: str = 'data/pm25_history.csv',
+                                output_name: str = 'timeseries.png') -> str:
+        """Create a styled PM2.5 time series line graph."""
         dates = []
         pm25_values = []
-        
+
         if os.path.exists(history_file):
             try:
                 with open(history_file, 'r') as f:
@@ -184,91 +230,69 @@ class PM25Visualizer:
                         pm25_values.append(float(row['pm25']))
             except Exception as e:
                 print(f"Error reading history file: {e}")
-        
-        # Add current measurement
+
         current_date = datetime.now().strftime('%Y-%m-%d %H:%M')
         dates.append(current_date)
         pm25_values.append(float(current_pm25))
-        
-        # Keep only last 30 measurements
+
         if len(dates) > 30:
             dates = dates[-30:]
             pm25_values = pm25_values[-30:]
-        
-        # Save updated history
+
         os.makedirs(os.path.dirname(history_file), exist_ok=True)
         with open(history_file, 'w', newline='') as f:
             writer = csv.DictWriter(f, fieldnames=['date', 'pm25'])
             writer.writeheader()
             for date, pm25 in zip(dates, pm25_values):
                 writer.writerow({'date': date, 'pm25': pm25})
-        
-        # Create plot
+
         fig, ax = plt.subplots(figsize=(12, 6))
-        
-        # Plot line
-        ax.plot(range(len(pm25_values)), pm25_values, marker='o', linewidth=2, 
-               markersize=6, color='#2E86AB', label='PM2.5')
-        
-        # Color zones based on AQI categories
-        ax.axhspan(0, 12, alpha=0.1, color='green', label='Good')
-        ax.axhspan(12, 35.4, alpha=0.1, color='yellow', label='Moderate')
-        ax.axhspan(35.4, 55.4, alpha=0.1, color='orange', label='Unhealthy (Sensitive)')
-        ax.axhspan(55.4, 150, alpha=0.1, color='red', label='Unhealthy')
-        ax.axhspan(150, 300, alpha=0.1, color='purple', label='Very Unhealthy')
-        
-        # Styling
-        ax.set_xlabel('Measurement Timeline', fontsize=12, fontweight='bold')
-        ax.set_ylabel('PM2.5 Concentration (µg/m³)', fontsize=12, fontweight='bold')
-        ax.set_title('PM2.5 Levels Over Time', fontsize=14, fontweight='bold', pad=20)
-        ax.grid(True, alpha=0.3)
-        ax.legend(loc='upper left', fontsize=9)
-        
-        # X-axis labels - show every 5th date if too many
+
+        x = range(len(pm25_values))
+        # Line with gradient markers
+        ax.plot(x, pm25_values, marker='o', linewidth=2.5, markersize=7,
+                color='#818cf8', markerfacecolor='#c7d2fe', markeredgecolor='#6366f1',
+                markeredgewidth=1.5, label='PM2.5', zorder=5)
+        ax.fill_between(x, pm25_values, alpha=0.08, color='#818cf8')
+
+        # AQI zone bands
+        zones = [
+            (0, 12, '#22c55e', 'Good', 0.08),
+            (12, 35.4, '#eab308', 'Moderate', 0.07),
+            (35.4, 55.4, '#f97316', 'USG', 0.06),
+            (55.4, 150, '#ef4444', 'Unhealthy', 0.05),
+            (150, 300, '#a855f7', 'Very Unhealthy', 0.04),
+        ]
+        for lo, hi, c, lbl, a in zones:
+            ax.axhspan(lo, hi, alpha=a, color=c)
+
+        ax.set_xlabel('Measurement Timeline', fontsize=12, fontweight='bold', labelpad=10)
+        ax.set_ylabel('PM2.5 Concentration (ug/m3)', fontsize=12, fontweight='bold', labelpad=10)
+        ax.set_title('PM2.5 Levels Over Time', fontsize=14, fontweight='bold', pad=16)
+        ax.grid(True, alpha=0.15, linestyle='--')
+
         if len(dates) > 10:
             step = max(1, len(dates) // 10)
-            indices = range(0, len(dates), step)
+            indices = list(range(0, len(dates), step))
             ax.set_xticks(indices)
-            ax.set_xticklabels([dates[i].split()[0] for i in indices], 
-                              rotation=45, ha='right')
+            ax.set_xticklabels([dates[i].split()[0] for i in indices], rotation=45, ha='right')
         else:
             ax.set_xticks(range(len(dates)))
-            ax.set_xticklabels([d.split()[0] for d in dates], 
-                              rotation=45, ha='right')
-        
+            ax.set_xticklabels([d.split()[0] for d in dates], rotation=45, ha='right')
+
+        ax.legend(loc='upper left', fontsize=9, framealpha=0.3)
         plt.tight_layout()
-        
-        # Save
         output_path = os.path.join(self.results_dir, output_name)
-        plt.savefig(output_path, dpi=150, bbox_inches='tight')
+        plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='#ffffff')
         plt.close()
-        
         return output_path
-    
+
     def create_feature_chart(self, features: Dict[str, float],
-                           output_name: str = 'features.png') -> str:
-        """
-        Create a chart showing all extracted atmospheric features.
-        
-        Args:
-            features: Dictionary of atmospheric features
-            output_name: Name for output file
-            
-        Returns:
-            str: Path to saved chart
-        """
-        fig, ax = plt.subplots(figsize=(10, 6))
-        
-        # Prepare data
-        feature_names = [
-            'Haze\nScore',
-            'Turbidity',
-            'Visibility',
-            'Contrast',
-            'Brightness\n(norm)',
-            'Saturation\n(norm)'
-        ]
-        
+                             output_name: str = 'features.png') -> str:
+        """Create a combined bar + line chart for atmospheric features."""
+        fig, ax1 = plt.subplots(figsize=(11, 6))
+
+        feature_names = ['Haze\nScore', 'Turbidity', 'Visibility', 'Contrast', 'Brightness\n(norm)', 'Saturation\n(norm)']
         values = [
             features.get('haze_score', 0),
             features.get('turbidity', 0),
@@ -277,51 +301,53 @@ class PM25Visualizer:
             (features.get('brightness', 128) / 255) * 100,
             (features.get('saturation', 128) / 255) * 100
         ]
-        
-        colors = ['#FF6B6B', '#FFA07A', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7']
-        
-        # Create bar chart
-        bars = ax.bar(feature_names, values, color=colors, alpha=0.8, edgecolor='black')
-        
-        # Add value labels on bars
+
+        bar_colors = ['#ef4444', '#f59e0b', '#10b981', '#3b82f6', '#8b5cf6', '#ec4899']
+        x = np.arange(len(feature_names))
+        width = 0.55
+
+        # Bar chart
+        bars = ax1.bar(x, values, width, color=bar_colors, alpha=0.85, edgecolor='none', zorder=3)
+
+        # Value labels on top
         for bar, val in zip(bars, values):
-            height = bar.get_height()
-            ax.text(bar.get_x() + bar.get_width()/2., height,
-                   f'{val:.1f}',
-                   ha='center', va='bottom', fontweight='bold')
-        
-        ax.set_ylabel('Score (0-100)', fontsize=12, fontweight='bold')
-        ax.set_title('Atmospheric Feature Analysis', fontsize=14, fontweight='bold', pad=20)
-        ax.set_ylim(0, 110)
-        ax.grid(axis='y', alpha=0.3)
-        
+            ax1.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 1.5,
+                    f'{val:.1f}', ha='center', va='bottom', fontweight='bold',
+                    fontsize=10, color='#e5e7eb')
+
+        ax1.set_ylabel('Score (0-100)', fontsize=12, fontweight='bold', labelpad=10)
+        ax1.set_title('Atmospheric Feature Analysis', fontsize=14, fontweight='bold', pad=16)
+        ax1.set_xticks(x)
+        ax1.set_xticklabels(feature_names, fontsize=9)
+        ax1.set_ylim(0, max(values) * 1.25 if max(values) > 0 else 110)
+        ax1.grid(axis='y', alpha=0.12, linestyle='--')
+
+        # Overlay line chart on secondary axis
+        ax2 = ax1.twinx()
+        ax2.plot(x, values, marker='D', linewidth=2, markersize=7,
+                 color='#facc15', markerfacecolor='#fef08a', markeredgecolor='#eab308',
+                 markeredgewidth=1.5, label='Trend', zorder=5)
+        ax2.set_ylabel('Trend Line', fontsize=11, color='#facc15', labelpad=10)
+        ax2.set_ylim(ax1.get_ylim())
+        ax2.tick_params(axis='y', colors='#facc15')
+
+        # Legends
+        ax1.legend(['Features (Bar)'], loc='upper left', fontsize=9, framealpha=0.3)
+        ax2.legend(loc='upper right', fontsize=9, framealpha=0.3)
+
         plt.tight_layout()
-        
-        # Save
         output_path = os.path.join(self.results_dir, output_name)
-        plt.savefig(output_path, dpi=150, bbox_inches='tight')
+        plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='#ffffff')
         plt.close()
-        
         return output_path
-    
-    def create_all_visualizations(self, image_path: str, pm25_value: float, 
-                                 features: Dict[str, float]) -> Dict[str, str]:
-        """
-        Create all visualizations at once.
-        
-        Args:
-            image_path: Path to original satellite image
-            pm25_value: Estimated PM2.5 concentration
-            features: Atmospheric features
-            
-        Returns:
-            dict: Paths to all generated visualizations
-        """
-        results = {
+
+    def create_all_visualizations(self, image_path: str, pm25_value: float,
+                                  features: Dict[str, float]) -> Dict[str, str]:
+        """Create all visualizations at once."""
+        return {
             'heatmap': self.create_heatmap(image_path, pm25_value),
+            'dehazed': self.create_dehazed(image_path),
             'before_after': self.create_before_after(image_path),
             'timeseries': self.create_timeseries_graph(pm25_value),
             'features': self.create_feature_chart(features)
         }
-        
-        return results
