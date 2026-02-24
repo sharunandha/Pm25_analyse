@@ -70,9 +70,11 @@ class PM25Visualizer:
                  0.30 * (1.0 - veg_score) +
                  0.20 * (1.0 - local_contrast))
 
-        # Scale by predicted PM2.5 so hotter predictions create stronger hot zones
-        pm25_factor = np.clip(pm25_value / 120.0, 0.45, 1.25)
-        score = np.clip(score * pm25_factor, 0, 1)
+        # Scale by predicted PM2.5: higher PM2.5 = more intense red overlay
+        # For high PM2.5 (>75), shift base score upward so most pixels show red
+        pm25_normalized = np.clip(pm25_value / 120.0, 0, 1)
+        pm25_boost = pm25_normalized * 0.5  # Boost score by up to 0.5 for high PM2.5
+        score = np.clip(score * (0.8 + pm25_normalized * 0.6) + pm25_boost, 0, 1)
 
         # Smooth field for organic heatmap boundaries
         score = cv2.GaussianBlur(score, (0, 0), 5.5)
