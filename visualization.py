@@ -39,10 +39,8 @@ class PM25Visualizer:
     def create_heatmap(self, image_path: str, pm25_value: float,
                        output_name: str = 'heatmap.png') -> str:
         """
-        Create a smooth multi-band PM2.5 heatmap overlay with contour lines.
-
-        Style: low→high bands with clear boundaries (similar to GIS heatmaps)
-        instead of binary square blocks.
+        Create a smooth gradient PM2.5 heatmap overlay.
+        Style: blue (clean) → cyan → green → yellow → orange → red (polluted)
         """
         image = cv2.imread(image_path)
         image = cv2.resize(image, (800, 600), interpolation=cv2.INTER_LANCZOS4)
@@ -78,35 +76,21 @@ class PM25Visualizer:
         score = cv2.GaussianBlur(score, (0, 0), 5.5)
         score = cv2.GaussianBlur(score, (0, 0), 2.0)
 
-        # Plot filled bands + contour lines
+        # Plot with smooth gradient colormap (blue → red)
         fig, ax = plt.subplots(figsize=(12, 8))
         ax.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
 
-        levels = [0.00, 0.18, 0.32, 0.46, 0.60, 0.74, 1.01]
-        fill_colors = ['#f8f9fa', '#0099ff', '#00ffff', '#00ff00', '#ffff00', '#ff6600', '#ff0000']
-
-        ax.contourf(score, levels=levels, colors=fill_colors, alpha=0.65, origin='upper', antialiased=True)
-        ax.contour(score,
-                   levels=[0.32, 0.46, 0.60, 0.74],
-                   colors=['#0066cc', '#00cc00', '#ff9900', '#ff0000'],
-                   linewidths=2.0,
-                   alpha=0.95,
-                   origin='upper')
+        # Use smooth colormap from matplotlib
+        im = ax.imshow(score, cmap='turbo', alpha=0.6, origin='upper', vmin=0, vmax=1)
 
         ax.set_title(f'PM2.5 Heatmap Overlay (Low-Medium-High)  |  Est: {pm25_value:.1f} ug/m3',
                      fontsize=14, fontweight='bold', pad=14)
         ax.axis('off')
 
-        # Custom legend
-        from matplotlib.patches import Patch
-        legend_elements = [
-            Patch(facecolor='#0099ff', edgecolor='#000', label='Low PM2.5'),
-            Patch(facecolor='#ffff00', edgecolor='#000', label='Moderate PM2.5'),
-            Patch(facecolor='#ff0000', edgecolor='#000', label='High PM2.5'),
-        ]
-        ax.legend(handles=legend_elements, loc='lower right', fontsize=10,
-                  framealpha=0.9, facecolor='#ffffff', edgecolor='#d1d5db',
-                  labelcolor='#111827')
+        # Add colorbar legend
+        cbar = plt.colorbar(im, ax=ax, orientation='vertical', pad=0.01, shrink=0.8)
+        cbar.set_label('Pollution Level', fontsize=10, fontweight='bold')
+        cbar.ax.set_yticklabels(['Clean', 'Low', 'Moderate', 'High', 'Very High'])
 
         plt.tight_layout()
         output_path = os.path.join(self.results_dir, output_name)
