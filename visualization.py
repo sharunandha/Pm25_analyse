@@ -70,12 +70,9 @@ class PM25Visualizer:
                  0.30 * (1.0 - veg_score) +
                  0.20 * (1.0 - local_contrast))
 
-        # Boost score based on PM2.5 level: higher PM2.5 pushes more pixels to red
-        pm25_normalized = np.clip(pm25_value / 100.0, 0, 1)
-        # Both multiply (to amplify existing haze) and add (to shift baseline up)
-        multiplier = 0.8 + pm25_normalized * 0.8
-        additive_boost = pm25_normalized * 0.35
-        score = np.clip(score * multiplier + additive_boost, 0, 1)
+        # Scale by predicted PM2.5 so hotter predictions create stronger hot zones
+        pm25_factor = np.clip(pm25_value / 120.0, 0.5, 1.2)
+        score = np.clip(score * pm25_factor, 0, 1)
 
         # Smooth field for organic heatmap boundaries
         score = cv2.GaussianBlur(score, (0, 0), 5.5)
