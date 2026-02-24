@@ -39,104 +39,70 @@ class PM25Visualizer:
     def create_heatmap(self, image_path: str, pm25_value: float,
                        output_name: str = 'heatmap.png') -> str:
         """
-        Create a PM2.5 grid heatmap overlay (Red = PM2.5 present, Green = clean).
+        Create a smooth multi-band PM2.5 heatmap overlay with contour lines.
 
-        Method:
-        1. Divide the image into a grid of blocks (e.g. 20x20 pixels).
-        2. For each block, compute a PM2.5 likelihood score using:
-           - Haze Index: high brightness + low saturation = hazy/polluted
-           - Vegetation Index: green-dominant pixels indicate clean areas
-           - Contrast: low local contrast suggests haze/aerosol scattering
-           The combined score is:
-             score = 0.45*haze + 0.30*(1-vegetation) + 0.25*(1-contrast_norm)
-        3. Threshold the score: score >= 0.45 → Red (PM2.5), else → Green (clean).
-        4. Apply the colored grid as a semi-transparent overlay on the original image.
+        Style: low→high bands with clear boundaries (similar to GIS heatmaps)
+        instead of binary square blocks.
         """
         image = cv2.imread(image_path)
-        image = cv2.resize(image, (800, 600))
-        h, w = image.shape[:2]
+        image = cv2.resize(image, (800, 600), interpolation=cv2.INTER_LANCZOS4)
 
         # Convert to useful color spaces
         hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV).astype(np.float32)
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY).astype(np.float32)
-        img_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB).astype(np.float32)
+        rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB).astype(np.float32)
 
-        grid_size = 20  # pixels per grid block
-        rows = h // grid_size
-        cols = w // grid_size
+        # Per-pixel pollution likelihood field
+        brightness = hsv[:, :, 2] / 255.0
+        saturation = hsv[:, :, 1] / 255.0
+        haze_score = brightness * (1.0 - saturation)
 
-        # Create overlay with same size as image
-        overlay = image.copy()
+        red = rgb[:, :, 0]
+        green = rgb[:, :, 1]
+        veg_index = (green - red) / (green + red + 1e-6)
+        veg_score = np.clip((veg_index + 1.0) / 2.0, 0, 1)
 
-        # Red and green colors (BGR)
-        RED = (0, 0, 220)
-        GREEN = (0, 180, 0)
+        local_edges = np.abs(cv2.Laplacian(gray, cv2.CV_32F, ksize=3))
+        local_contrast = cv2.GaussianBlur(local_edges, (0, 0), 2.0)
+        local_contrast = local_contrast / (np.max(local_contrast) + 1e-6)
 
-        for r in range(rows):
-            for c in range(cols):
-                y1 = r * grid_size
-                y2 = y1 + grid_size
-                x1 = c * grid_size
-                x2 = x1 + grid_size
+        score = (0.50 * haze_score +
+                 0.30 * (1.0 - veg_score) +
+                 0.20 * (1.0 - local_contrast))
 
-                block_hsv = hsv[y1:y2, x1:x2]
-                block_gray = gray[y1:y2, x1:x2]
-                block_rgb = img_rgb[y1:y2, x1:x2]
+        # Scale by predicted PM2.5 so hotter predictions create stronger hot zones
+        pm25_factor = np.clip(pm25_value / 120.0, 0.45, 1.25)
+        score = np.clip(score * pm25_factor, 0, 1)
 
-                # --- Haze Index ---
-                # Haze = bright + desaturated pixels
-                brightness = block_hsv[:, :, 2] / 255.0  # V channel
-                saturation = block_hsv[:, :, 1] / 255.0  # S channel
-                haze_score = np.mean(brightness * (1.0 - saturation))  # 0-1
+        # Smooth field for organic heatmap boundaries
+        score = cv2.GaussianBlur(score, (0, 0), 5.5)
+        score = cv2.GaussianBlur(score, (0, 0), 2.0)
 
-                # --- Vegetation Index (pseudo-NDVI from RGB) ---
-                # Green channel dominance relative to red
-                r_ch = block_rgb[:, :, 0]
-                g_ch = block_rgb[:, :, 1]
-                denom = r_ch + g_ch + 1e-6
-                veg_index = np.mean((g_ch - r_ch) / denom)  # -1 to 1
-                veg_score = np.clip((veg_index + 1) / 2.0, 0, 1)  # normalize to 0-1
-
-                # --- Local Contrast ---
-                contrast = np.std(block_gray) / 128.0  # normalized
-                contrast = np.clip(contrast, 0, 1)
-
-                # --- Combined PM2.5 likelihood score ---
-                pm25_score = (0.45 * haze_score +
-                              0.30 * (1.0 - veg_score) +
-                              0.25 * (1.0 - contrast))
-
-                # Threshold: mark as polluted or clean
-                if pm25_score >= 0.45:
-                    color = RED
-                else:
-                    color = GREEN
-
-                cv2.rectangle(overlay, (x1, y1), (x2, y2), color, -1)
-
-        # Blend overlay with original image (semi-transparent)
-        blended = cv2.addWeighted(image, 0.45, overlay, 0.55, 0)
-
-        # Draw grid lines for clarity
-        for r in range(rows + 1):
-            y = r * grid_size
-            cv2.line(blended, (0, y), (w, y), (40, 40, 40), 1)
-        for c in range(cols + 1):
-            x = c * grid_size
-            cv2.line(blended, (x, 0), (x, h), (40, 40, 40), 1)
-
-        # Plot with legend
+        # Plot filled bands + contour lines
         fig, ax = plt.subplots(figsize=(12, 8))
-        ax.imshow(cv2.cvtColor(blended, cv2.COLOR_BGR2RGB))
-        ax.set_title(f'PM2.5 Grid Heatmap Overlay (Low-Medium-High)  |  Est: {pm25_value:.1f} ug/m3',
+        ax.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+
+        levels = [0.00, 0.18, 0.32, 0.46, 0.60, 0.74, 1.01]
+        fill_colors = ['#f3f4f6', '#60a5fa', '#22d3ee', '#4ade80', '#fde047', '#fb923c', '#ef4444']
+
+        ax.contourf(score, levels=levels, colors=fill_colors, alpha=0.55, origin='upper', antialiased=True)
+        ax.contour(score,
+                   levels=[0.32, 0.46, 0.60, 0.74],
+                   colors=['#3b82f6', '#10b981', '#f59e0b', '#dc2626'],
+                   linewidths=1.3,
+                   alpha=0.9,
+                   origin='upper')
+
+        ax.set_title(f'PM2.5 Heatmap Overlay (Low-Medium-High)  |  Est: {pm25_value:.1f} ug/m3',
                      fontsize=14, fontweight='bold', pad=14)
         ax.axis('off')
 
         # Custom legend
         from matplotlib.patches import Patch
         legend_elements = [
-            Patch(facecolor='#dc2626', edgecolor='#333', label='PM2.5 Detected (Polluted)'),
-            Patch(facecolor='#16a34a', edgecolor='#333', label='Clean / Vegetation'),
+            Patch(facecolor='#60a5fa', edgecolor='#333', label='Low PM2.5'),
+            Patch(facecolor='#fde047', edgecolor='#333', label='Moderate PM2.5'),
+            Patch(facecolor='#ef4444', edgecolor='#333', label='High PM2.5'),
         ]
         ax.legend(handles=legend_elements, loc='lower right', fontsize=10,
                   framealpha=0.9, facecolor='#ffffff', edgecolor='#d1d5db',
