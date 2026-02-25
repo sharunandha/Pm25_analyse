@@ -39,63 +39,191 @@ class PM25Visualizer:
     def create_heatmap(self, image_path: str, pm25_value: float,
                        output_name: str = 'heatmap.png') -> str:
         """
-        Create a smooth gradient PM2.5 heatmap overlay.
-        Style: blue (clean) → cyan → green → yellow → orange → red (polluted)
+        Create professional PM2.5 heatmap with circular hotspot zones.
+        Red centers (pollution) → Yellow rings → Green (clean air).
+        Similar to environmental monitoring heatmaps.
         """
         image = cv2.imread(image_path)
         image = cv2.resize(image, (800, 600), interpolation=cv2.INTER_LANCZOS4)
 
-        # Convert to useful color spaces
-        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV).astype(np.float32)
+        height, width = image.shape[:2]
+        
+        # Convert to grayscale for analysis
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY).astype(np.float32)
+        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV).astype(np.float32)
         rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB).astype(np.float32)
 
-        # Per-pixel pollution likelihood field
+        # DETECT POLLUTION HOTSPOT LOCATIONS
+        # Identify where pollution concentrations are likely
+        
+        # 1. Haze/Aerosol Detection
         brightness = hsv[:, :, 2] / 255.0
         saturation = hsv[:, :, 1] / 255.0
-        haze_score = brightness * (1.0 - saturation)
-
-        red = rgb[:, :, 0]
-        green = rgb[:, :, 1]
-        veg_index = (green - red) / (green + red + 1e-6)
-        veg_score = np.clip((veg_index + 1.0) / 2.0, 0, 1)
-
-        local_edges = np.abs(cv2.Laplacian(gray, cv2.CV_32F, ksize=3))
-        local_contrast = cv2.GaussianBlur(local_edges, (0, 0), 2.0)
-        local_contrast = local_contrast / (np.max(local_contrast) + 1e-6)
-
-        score = (0.50 * haze_score +
-                 0.30 * (1.0 - veg_score) +
-                 0.20 * (1.0 - local_contrast))
-
-        # Scale by predicted PM2.5 so hotter predictions create stronger hot zones
-        pm25_factor = np.clip(pm25_value / 120.0, 0.5, 1.2)
-        score = np.clip(score * pm25_factor, 0, 1)
-
-        # Smooth field for organic heatmap boundaries
-        score = cv2.GaussianBlur(score, (0, 0), 5.5)
-        score = cv2.GaussianBlur(score, (0, 0), 2.0)
-
-        # Plot with smooth gradient colormap (blue → red)
-        fig, ax = plt.subplots(figsize=(12, 8))
-        ax.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-
-        # Use smooth colormap from matplotlib
-        im = ax.imshow(score, cmap='turbo', alpha=0.6, origin='upper', vmin=0, vmax=1)
-
-        ax.set_title(f'PM2.5 Heatmap Overlay (Low-Medium-High)  |  Est: {pm25_value:.1f} ug/m3',
-                     fontsize=14, fontweight='bold', pad=14)
+        haze_map = brightness * (1.0 - saturation)
+        
+        # 2. Non-vegetation areas (urban/industrial)
+        r = rgb[:, :, 0] / 255.0
+        g = rgb[:, :, 1] / 255.0
+        b = rgb[:, :, 2] / 255.0
+        veg_index = (g - r) / (g + r + 1e-6)
+        non_veg_map = 1.0 - np.clip((veg_index + 1.0) / 2.0, 0, 1)
+        
+        # 3. Brown/dust colored areas
+        brown_map = np.abs(r - b) / (r + b + 0.1)
+        brown_map = np.clip(brown_map, 0, 1)
+        
+        # Combined pollution potential map
+        pollution_potential = (0.4 * haze_map + 0.3 * non_veg_map + 0.3 * brown_map)
+        pollution_potential = np.clip(pollution_potential, 0, 1)
+        
+        # Smooth the map
+        pollution_potential = cv2.GaussianBlur(pollution_potential, (21, 21), 0)
+        
+        # FIND HOTSPOT CENTERS using local maxima
+        # Determine number of hotspots based on PM2.5 level
+        # NO hotspots for good air quality (PM2.5 <= 12)
+        if pm25_value <= 12:
+            num_hotspots = 0  # Good air = no pollution marking
+            hotspot_intensity = 0.0
+        elif pm25_value <= 35:
+            num_hotspots = 1  # Moderate = minimal hotspots
+            hotspot_intensity = 0.4
+        elif pm25_value <= 55:
+            num_hotspots = 3  # Sensitive = light hotspots
+            hotspot_intensity = 0.6
+        elif pm25_value <= 80:
+            num_hotspots = 6
+            hotspot_intensity = 0.75
+        elif pm25_value > 150:
+            num_hotspots = 15
+            hotspot_intensity = 0.95
+        else:  # 80 < PM2.5 <= 150
+            num_hotspots = 10
+            hotspot_intensity = 0.85
+        
+        # Find local maxima in pollution potential
+        hotspots = []
+        pollution_copy = pollution_potential.copy()
+        
+        for _ in range(num_hotspots):
+            if np.max(pollution_copy) < 0.2:
+                break
+            # Find strongest point
+            max_idx = np.unravel_index(np.argmax(pollution_copy), pollution_copy.shape)
+            y, x = max_idx
+            strength = pollution_copy[y, x]
+            hotspots.append((x, y, strength))
+            
+            # Suppress area around this point
+            y_min = max(0, y - 50)
+            y_max = min(height, y + 50)
+            x_min = max(0, x - 50)
+            x_max = min(width, x + 50)
+            pollution_copy[y_min:y_max, x_min:x_max] *= 0.3
+        
+        # CREATE HEATMAP with circular hotspot zones
+        heatmap = np.zeros((height, width), dtype=np.float32)
+        
+        # Draw each hotspot as a radial gradient
+        y_mesh, x_mesh = np.meshgrid(np.arange(height), np.arange(width), indexing='ij')
+        
+        for cx, cy, strength in hotspots:
+            # Distance from hotspot center
+            distance = np.sqrt((x_mesh - cx) ** 2 + (y_mesh - cy) ** 2)
+            
+            # Radial gradient from center
+            # Inner radius (hot red zone)
+            inner_radius = 30
+            # Outer radius (green zone)
+            outer_radius = 100
+            
+            # Create gradient: 1.0 at center, 0 at outer_radius
+            zone = np.exp(-(distance ** 2) / (2 * (outer_radius ** 2) * 0.5))
+            zone *= (strength * hotspot_intensity)
+            
+            heatmap = np.maximum(heatmap, zone)
+        
+        # Normalize heatmap
+        if np.max(heatmap) > 0:
+            heatmap = heatmap / np.max(heatmap)
+        
+        # Generate RGB heatmap with Green-Yellow-Red gradient
+        heatmap_rgb = np.zeros((height, width, 3), dtype=np.uint8)
+        
+        for y in range(height):
+            for x in range(width):
+                value = heatmap[y, x]
+                
+                if value < 0.33:
+                    # Green zone (0.0-0.33)
+                    ratio = value / 0.33
+                    r = int(127 * ratio)
+                    g = 200
+                    b = int(100 * (1 - ratio))
+                elif value < 0.67:
+                    # Yellow zone (0.33-0.67)
+                    ratio = (value - 0.33) / 0.34
+                    r = int(127 + 128 * ratio)
+                    g = int(200 - 75 * ratio)
+                    b = 50
+                else:
+                    # Red zone (0.67-1.0)
+                    ratio = (value - 0.67) / 0.33
+                    r = 255
+                    g = int(125 - 100 * ratio)
+                    b = int(50 - 40 * ratio)
+                
+                heatmap_rgb[y, x] = [b, g, r]  # BGR format for OpenCV
+        
+        # Blend heatmap with original image
+        heatmap_rgb_float = heatmap_rgb.astype(np.float32) / 255.0
+        image_float = image.astype(np.float32) / 255.0
+        
+        # 60% heatmap, 40% original image
+        blended = (0.6 * heatmap_rgb_float + 0.4 * image_float) * 255
+        blended = np.clip(blended, 0, 255).astype(np.uint8)
+        blended_rgb = cv2.cvtColor(blended, cv2.COLOR_BGR2RGB)
+        
+        # Visualization
+        fig, ax = plt.subplots(figsize=(14, 10), dpi=100)
+        ax.imshow(blended_rgb)
+        
+        # Title
+        ax.set_title(f'PM2.5 Pollution Hotspot Heatmap  |  Level: {pm25_value:.1f} µg/m³',
+                     fontsize=16, fontweight='bold', pad=20, color='#000000')
         ax.axis('off')
-
-        # Add colorbar legend
-        cbar = plt.colorbar(im, ax=ax, orientation='vertical', pad=0.01, shrink=0.8)
-        cbar.set_label('Pollution Level', fontsize=10, fontweight='bold')
-        cbar.ax.set_yticklabels(['Clean', 'Low', 'Moderate', 'High', 'Very High'])
+        
+        # Determine air quality category
+        if pm25_value <= 12:
+            category = "GOOD - Air quality is satisfactory"
+            color = '#00D084'
+        elif pm25_value <= 35:
+            category = "MODERATE - Acceptable air quality"
+            color = '#7FDB4E'
+        elif pm25_value <= 55:
+            category = "SENSITIVE - Sensitive groups may be affected"
+            color = '#FFB300'
+        elif pm25_value <= 150:
+            category = "UNHEALTHY - General public may experience issues"
+            color = '#FF5050'
+        else:
+            category = "HAZARDOUS - Emergency conditions"
+            color = '#8B0000'
+        
+        # Add legend
+        legend_text = f"{category}\n\nHotspot Legend:\nRed = High Pollution | Yellow = Moderate | Green = Clean Air"
+        fig.text(0.5, 0.02, legend_text, ha='center', fontsize=11, 
+                fontweight='bold', color=color, bbox=dict(boxstyle='round', 
+                facecolor='#ffffff', alpha=0.9, edgecolor=color, linewidth=2))
 
         plt.tight_layout()
         output_path = os.path.join(self.results_dir, output_name)
         plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='#ffffff')
         plt.close()
+        
+        print(f"✓ Heatmap generated: {output_path}")
+        print(f"  PM2.5 Level: {pm25_value:.1f} µg/m³ | Hotspots: {len(hotspots)} | Status: {category}")
+        
         return output_path
 
     def _generate_dehazed_image(self, image: np.ndarray) -> np.ndarray:
